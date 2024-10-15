@@ -1,0 +1,174 @@
+---
+title: "Final Project Part 1"
+author: "A. Kajuch"
+date: "2024-10-15"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Library
+
+```{r librarys}
+library(tidyverse)
+library(lolcat)
+library(ggplot2)
+```
+
+# Load in the Data
+All data was compiled from the City of New York open API.
+```{r load data}
+file_url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+data <- read.csv(file_url)
+head(data)
+```
+
+# Prep Data to View Shootings per Day in NYC
+The data required initial cleaning to prepare the data to view the shootings per calendar day. Here, multiple columns were removed, and dates were converted so all of the data from 2006 to 2023 could be combined. 
+```{r prepare data}
+cleaned_data <- data %>%
+  select(-INCIDENT_KEY, -OCCUR_TIME, -LOC_OF_OCCUR_DESC, -PRECINCT, -JURISDICTION_CODE, -LOC_CLASSFCTN_DESC, -X_COORD_CD, -Y_COORD_CD, -Lon_Lat, -LOCATION_DESC, -PERP_AGE_GROUP, -PERP_RACE, - PERP_SEX) %>%
+  mutate(OCCUR_DATE = as.Date(OCCUR_DATE, format = "%m/%d/%Y"))
+
+
+cleaned_data <- cleaned_data %>%
+  mutate(DAY_OF_YEAR = yday(OCCUR_DATE))
+
+cleaned_data <- cleaned_data %>%
+  mutate(Date_m_d = format(as.Date(paste0("2024-", DAY_OF_YEAR), format = "%Y-%j"), "%m/%d"))
+head(cleaned_data)
+
+shootings_per_day <- cleaned_data %>%
+  group_by(Date_m_d) %>%
+  summarize(num_shootings = n()) %>%
+  ungroup()
+
+head(shootings_per_day)
+```
+
+# Shootings per day Analysis
+A brief analysis was preformed on the shootings per each day in NYC. Given the particular interest in days that have a higher incident rate, the data was organized to find out what our 5% extreme end was. The data was tested for normaility using skewness and kurtosis, and the results came back that the data was not normal. Therefore, it was decided to use the 95th quantile in order to set the threshold for a high volume incident day.
+
+```{r analysis}
+# calculate average and standard deviation of shootings
+(mean_shootings <- mean(shootings_per_day$num_shootings))
+(sd_shootings <- sd(shootings_per_day$num_shootings))
+
+# display grouped histogram of shootings per day
+hist.grouped(shootings_per_day$num_shootings, col = "blue", main = "Histogram of Shooting Averages per Day", xlab = "Shooting Counts")
+summary.continuous(shootings_per_day$num_shootings)
+
+summary.continuous(shootings_per_day$num_shootings)
+# determine threshold for extreme high-end days
+(threshold_high <- quantile(shootings_per_day$num_shootings, 0.95))  
+
+# identify extreme high-end days
+extreme_high_days <- shootings_per_day %>%
+  filter(num_shootings > threshold_high) %>%
+  mutate(Significance = "High")
+
+print(extreme_high_days)
+```
+
+# Prep data for memorial day analysis
+After finding our incidents, a particular interest was found in memorial day, as it was a day in may that stood out from all of the other days clustered around holidays or the summer. Thus the data was organized to analysis memorial day trends.
+``` {r memorial day prep}
+alldayshootings <- cleaned_data %>%
+  group_by(OCCUR_DATE) %>%
+  summarize(num_shootings = n())%>%
+  ungroup()
+head(alldayshootings)
+
+# find all of the last mondays in may
+get_memorial_day <- function(year) {
+  may_dates <- seq(as.Date(paste0(year, "-05-01")), as.Date(paste0(year, "-05-31")), by = "day")
+  mondays_in_may <- may_dates[weekdays(may_dates) == "Monday"]
+  return(tail(mondays_in_may, 1))
+}
+
+# find all dates memorial days from 2006 to 2023
+(memorial_days <- sapply(2006:2023, get_memorial_day))
+
+# convert day value to date
+convert_to_date <- function(day_number) {
+  date <- as.Date(day_number, origin = "1970-01-01")
+  formatted_date <- format(date, "%m/%d/%Y")
+  return(formatted_date)
+}
+(dates_in_md_format <- sapply(memorial_days, convert_to_date))
+
+specific_dates <- c("05/29/2006", "05/28/2007", "05/26/2008", "05/25/2009", 
+                    "05/31/2010", "05/30/2011", "05/28/2012", "05/27/2013", 
+                    "05/26/2014", "05/25/2015", "05/30/2016", "05/29/2017", 
+                    "05/28/2018", "05/27/2019", "05/25/2020", "05/31/2021", 
+                    "05/30/2022", "05/29/2023")
+specific_dates_converted <- as.Date(specific_dates, format = "%m/%d/%Y")
+
+print(specific_dates_converted)
+
+# filter the alldayshootings dataset for the specific dates
+filtered_shootings <- alldayshootings %>%
+  filter(OCCUR_DATE %in% specific_dates_converted)
+
+print(filtered_shootings)
+
+(sum(filtered_shootings$num_shootings))
+
+```
+
+# Plot trend of shootings on memorial day
+Given that our sum of all incidents on memorial day is above the threshold for an elevated incident day, it is interesting to trend the data. Here the data was plotted against time.
+```{r plot shootings on memorial day}
+# group by OCCUR_DATE and count the number of incidents
+(mean(filtered_shootings$num_shootings))
+head(filtered_shootings)
+# plot incidents over time
+ggplot(filtered_shootings, aes(x = OCCUR_DATE, y = num_shootings)) +
+  geom_line(color = "blue", size = 1) +  # Line plot for trends over time
+  geom_point(color = "green", size = 2) +  # Points for individual data
+  labs(title = "Number of Shooting Incidents on Memorial Day (2006-2023)",
+       x = "Memorial Day Date", y = "Number of Incidents") +
+  theme_minimal()
+```
+
+# Predictive linear model
+Here a model was created to predict future incidents for the next 3 years, however, the low r-squared value does not provide a strong belief in the model.
+```{r pretdictive modeling}
+# place data into vectors
+memorial_day_counts <- data.frame(
+  OCCUR_DATE = as.Date(c("2006-05-29", "2007-05-28", "2008-05-26", "2009-05-25", 
+                         "2010-05-31", "2011-05-30", "2012-05-28", "2013-05-27", 
+                         "2014-05-26", "2015-05-25", "2016-05-30", "2017-05-29", 
+                         "2018-05-28", "2019-05-27", "2020-05-25", "2021-05-31", 
+                         "2022-05-30", "2023-05-29")),
+  num_shootings = c(11, 6, 14, 8, 10, 13, 8, 6, 9, 6, 2, 1, 10, 10, 3, 20, 7, 2)
+)
+
+# extract the data needed
+memorial_day_counts$year <- as.numeric(format(memorial_day_counts$OCCUR_DATE, "%Y"))
+
+# create linear regression model
+lm_model <- lm(num_shootings ~ year, data = memorial_day_counts)
+
+# summarize linear model
+summary(lm_model)
+
+# predict the number of shootings for the next 3 years: 2024, 2025, 2026
+future_years <- data.frame(year = c(2024, 2025, 2026))
+predictions <- predict(lm_model, newdata = future_years)
+
+# print predicted values
+predicted_data <- data.frame(year = future_years$year, predicted_shootings = round(predictions, 0))
+print(predicted_data)
+
+# plot the existing data and predictions
+library(ggplot2)
+ggplot(memorial_day_counts, aes(x = year, y = num_shootings)) +
+  geom_point(color = "darkgreen", size = 2) +               # Plot the actual data points
+  geom_line(color = "blue") +                          # Line for actual data
+  geom_point(data = predicted_data, aes(x = year, y = predicted_shootings), color = "red", size = 3) +  # Predicted points
+  geom_line(data = predicted_data, aes(x = year, y = predicted_shootings), color = "red", linetype = "dashed") + # Predicted line
+  labs(title = "Memorial Day Shooting Incidents and Predictions", 
+       x = "Year", y = "Number of Shootings") +
+  theme_minimal()
+```
